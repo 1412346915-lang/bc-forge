@@ -101,11 +101,13 @@ does not itself issue or account — are rescuable.
   **underlying asset** recorded at initialization is rejected with
   `WrapperError::UnderlyingAssetProtected`. That single id is what
   `total_assets()` reports and what backs every user's `unwrap`/`withdraw`, so
-  banning it bans the whole of the vault's accounted assets. The wrapper's own
-  wrapped-token id is equally unrescuable in practice: user share balances
-  live under it, and it is never held by the vault except through the same
-  mistake path as any other foreign token — the explicit ban is the
-  underlying id.
+  banning it bans the whole of the vault's accounted assets.
+- On the wrapper vault, rescuing the vault's **own share token**
+  (`env.current_contract_address()`) is rejected with
+  `WrapperError::ShareTokenProtected`. The wrapper is itself a SEP-41 token.
+  Shares transferred to the vault address are an internal balance;
+  `TokenClient::transfer` would move them to the recovery address while
+  leaving total share supply unchanged.
 
 **Other limits.** `amount` must be positive, the rescue reverts with
 `InsufficientBalance` if the contract holds less than `amount` of the foreign

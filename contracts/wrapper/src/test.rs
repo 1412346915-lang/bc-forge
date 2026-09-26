@@ -2384,6 +2384,25 @@ fn test_rescue_tokens_rejects_underlying_asset() {
 }
 
 #[test]
+fn test_rescue_tokens_rejects_wrapper_shares_held_by_wrapper() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
+    wrapper.wrap(&user, &1_000);
+    let supply_before = wrapper.supply();
+    wrapper.transfer(&user, &wrapper.address, &400);
+
+    let recovery = Address::generate(&env);
+    let result = wrapper.try_rescue_tokens(&admin, &wrapper.address, &recovery, &400);
+    assert_eq!(result, Err(Ok(WrapperError::ShareTokenProtected)));
+
+    assert_eq!(wrapper.supply(), supply_before);
+    assert_eq!(wrapper.balance(&wrapper.address), 400);
+    assert_eq!(wrapper.balance(&recovery), 0);
+}
+
+#[test]
 fn test_rescue_tokens_rejects_invalid_amount() {
     let env = Env::default();
     env.mock_all_auths();

@@ -125,6 +125,9 @@ pub enum WrapperError {
     UnderlyingAssetProtected = 15,
     /// `rescue_tokens` was called with a non-positive amount.
     InvalidRescueAmount = 16,
+    /// `rescue_tokens` was called on this vault's own share token. Share
+    /// balances the vault holds are not stranded foreign assets.
+    ShareTokenProtected = 17,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -665,12 +668,15 @@ impl WrapperContract {
     /// belong to a shareholder who can sign. This escape hatch lets the admin
     /// send such a stranded balance to a recovery address.
     ///
-    /// The ban is exact: the token id stored at initialization as the
+    /// The ban covers two ids. The token stored at initialization as the
     /// underlying asset — the one whose contract balance [`WrapperContract::total_assets`]
     /// reports and whose movements back `unwrap`/`withdraw` — can never be
     /// rescued, and reverts with [`WrapperError::UnderlyingAssetProtected`].
-    /// Every accounted user asset sits under that single id, so banning it
-    /// bans the whole of `total_assets`. Any *other* token id is rescuable:
+    /// This vault's own share token is also rejected with
+    /// [`WrapperError::ShareTokenProtected`], because shares sitting on the
+    /// vault address are not a foreign balance. Every accounted user asset sits
+    /// under the underlying id, so banning it bans the whole of `total_assets`.
+    /// Any *other* token id is rescuable:
     /// the wrapper never accounts balances of a token it does not wrap, so no
     /// accounted funds can sit under a foreign id.
     ///
@@ -706,6 +712,9 @@ impl WrapperContract {
         let underlying_id = Self::read_underlying(&env);
         if token == underlying_id {
             return Err(WrapperError::UnderlyingAssetProtected);
+        }
+        if token == env.current_contract_address() {
+            return Err(WrapperError::ShareTokenProtected);
         }
         if amount <= 0 {
             return Err(WrapperError::InvalidRescueAmount);
