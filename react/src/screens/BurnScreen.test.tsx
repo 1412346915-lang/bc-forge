@@ -2,16 +2,18 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { BurnScreen } from './BurnScreen';
+import * as forgeContext from '../context';
 
 const mockUseBalance = jest.fn();
 const mockBurn = jest.fn();
+const mockBurnState: { error: Error | null } = { error: null };
 
 jest.mock('../hooks', () => ({
   useBalance: (...args: unknown[]) => mockUseBalance(...args),
   useBurn: () => ({
     burn: mockBurn,
     loading: false,
-    error: null as Error | null,
+    error: mockBurnState.error,
   }),
 }));
 
@@ -19,9 +21,11 @@ const ADDRESS = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFTGWEBUSAVCBCY42YOXT';
 
 describe('BurnScreen', () => {
   beforeEach(() => {
+    jest.restoreAllMocks();
     jest.clearAllMocks();
     mockUseBalance.mockReturnValue({ data: null, loading: false, error: null });
     mockBurn.mockResolvedValue({ success: true, hash: '0xburnhash' });
+    mockBurnState.error = null;
   });
 
   it('shows the connected balance and disables submit above it', () => {
@@ -65,5 +69,46 @@ describe('BurnScreen', () => {
         'Transaction hash: 0xburnhash',
       );
     });
+  });
+
+  it('uses the public key from the wallet context for balance and burn', async () => {
+    jest.spyOn(forgeContext, 'useWallet').mockReturnValue({
+      connected: true,
+      publicKey: ADDRESS,
+    });
+    mockUseBalance.mockReturnValue({ data: 500n, loading: false, error: null });
+
+    render(<BurnScreen />);
+
+    expect(mockUseBalance).toHaveBeenCalledWith(ADDRESS);
+    expect(screen.getByTestId('burn-connected-address')).toHaveTextContent(ADDRESS);
+
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '100' } });
+    fireEvent.click(screen.getByTestId('burn-submit'));
+
+    await waitFor(() => {
+      expect(mockBurn).toHaveBeenCalledWith(ADDRESS, 100n);
+    });
+  });
+
+  it('stays disconnected when the wallet context is not connected', () => {
+    jest.spyOn(forgeContext, 'useWallet').mockReturnValue({ connected: false });
+    mockUseBalance.mockReturnValue({ data: 500n, loading: false, error: null });
+
+    render(<BurnScreen />);
+
+    expect(screen.getByTestId('burn-connected-address')).toHaveTextContent('Not connected');
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '100' } });
+    expect(screen.getByTestId('burn-submit')).toBeDisabled();
+    expect(mockBurn).not.toHaveBeenCalled();
+  });
+
+  it('shows the burn error from the hook', () => {
+    mockBurnState.error = new Error('simulation failed');
+    mockUseBalance.mockReturnValue({ data: 500n, loading: false, error: null });
+
+    render(<BurnScreen walletAddress={ADDRESS} />);
+
+    expect(screen.getByTestId('burn-error')).toHaveTextContent('simulation failed');
   });
 });

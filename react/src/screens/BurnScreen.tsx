@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useWallet } from '../context';
 import { useBalance, useBurn } from '../hooks';
 import { Alert } from '../components/Alert';
 
@@ -29,7 +30,13 @@ export const BurnScreen: React.FC<BurnScreenProps> = ({
   style,
   className,
 }) => {
-  const connectedAddress = walletAddress ?? adapterPublicKey;
+  const wallet = useWallet();
+  // An explicit walletAddress overrides the provider. Otherwise the connected
+  // adapter on BcForgeProvider is the source of the account.
+  const connectedAddress = walletAddress ?? wallet.publicKey ?? adapterPublicKey;
+  const isConnected = walletAddress
+    ? true
+    : wallet.connected || Boolean(adapterPublicKey);
   const { data: balance, loading: balanceLoading } = useBalance(connectedAddress);
   const { burn, loading: burnLoading, error: burnError } = useBurn();
 
@@ -49,6 +56,7 @@ export const BurnScreen: React.FC<BurnScreenProps> = ({
   const overBalance =
     isPositiveInteger && balance !== null ? amount > balance : false;
   const canSubmit =
+    isConnected &&
     Boolean(connectedAddress) &&
     isPositiveInteger &&
     !overBalance &&
