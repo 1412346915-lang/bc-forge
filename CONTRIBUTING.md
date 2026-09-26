@@ -138,6 +138,8 @@ cargo test --tests
 cd sdk && npm run build
 ```
 
+Running `cargo test -p bc-forge-admin` regenerates `contracts/admin/test_snapshots/` locally; these Soroban snapshots are generated outputs and must remain untracked.
+
 CI also runs `cargo audit` against `Cargo.lock` in the Dependency Audit job: if any dependency matches a known RustSec advisory, the check fails and blocks the merge. Upgrade the affected crate (or, only when the advisory genuinely cannot apply, add a narrowly scoped, commented ignore) before opening your PR.
 
 ### 5. Pull Request Process
