@@ -12,6 +12,11 @@ import {
 } from '../utils/registry.js';
 import { createDeploymentsCommand } from '../commands/deployments.js';
 import { createUpgradeCommand } from '../commands/upgrade.js';
+import {
+  createConnectCommand,
+  createInitSuperAdminCommand,
+  createOrchestrateCommand,
+} from '../commands/orchestrator.js';
 import logger from '../utils/logger.js';
 
 const TESTNET_ID = `C${'A'.repeat(55)}`;
@@ -138,6 +143,33 @@ describe('Deployments registry (#937)', () => {
 
       cmd.setOptionValue('network', 'mainnet');
       expect(() => resolveContractIdOption(cmd, 'token', registryPath)).toThrow(/token/);
+    });
+
+    it('resolves aliases on init-superadmin, connect, and orchestrate for the selected network only', () => {
+      registerDeploymentAlias({
+        alias: 'token',
+        contractId: TESTNET_ID,
+        network: 'testnet',
+        filePath: registryPath,
+      });
+      registerDeploymentAlias({
+        alias: 'token',
+        contractId: MAINNET_ID,
+        network: 'mainnet',
+        filePath: registryPath,
+      });
+
+      for (const command of [
+        createInitSuperAdminCommand(),
+        createConnectCommand(),
+        createOrchestrateCommand(),
+      ]) {
+        expect(command.options.some((option) => option.attributeName() === 'network')).toBe(true);
+        command.setOptionValue('network', 'testnet');
+        expect(resolveContractIdOption(command, 'token', registryPath)).toBe(TESTNET_ID);
+        command.setOptionValue('network', 'mainnet');
+        expect(resolveContractIdOption(command, 'token', registryPath)).toBe(MAINNET_ID);
+      }
     });
   });
 

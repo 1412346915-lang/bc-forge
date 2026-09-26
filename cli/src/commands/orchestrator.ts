@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import logger from "../utils/logger.js";
+import { addNetworkOptions } from "../network.js";
 import { resolveContractIdOption } from "../utils/registry.js";
 import { initializeSuperAdmin } from "../orchestrator/init-superadmin.js";
 import { connectContractIds } from "../orchestrator/connect-contracts.js";
@@ -10,7 +11,7 @@ function resolveId(command: Command, value: string | undefined): string | undefi
 }
 
 export function createInitSuperAdminCommand(): Command {
-  return new Command("init-superadmin")
+  const command = new Command("init-superadmin")
     .description("Initialize contract natively with deployer as SuperAdmin and verify on-chain")
     .option("--contract-id <string>", "Contract ID or deployment alias to initialize")
     .option("--deployer <string>", "Deployer Stellar public key (G...)")
@@ -39,10 +40,12 @@ export function createInitSuperAdminCommand(): Command {
         process.exitCode = 1;
       }
     });
+
+  return addNetworkOptions(command);
 }
 
 export function createConnectCommand(): Command {
-  return new Command("connect")
+  const command = new Command("connect")
     .alias("link")
     .description("Connect deployed contract IDs post-deployment")
     .option("--admin <string>", "Admin contract ID or deployment alias")
@@ -71,10 +74,12 @@ export function createConnectCommand(): Command {
         process.exitCode = 1;
       }
     });
+
+  return addNetworkOptions(command);
 }
 
 export function createOrchestrateCommand(): Command {
-  return new Command("orchestrate")
+  const command = new Command("orchestrate")
     .description("Run full deployment orchestrator: initialize SuperAdmin and connect contract IDs")
     .option("--admin <string>", "Admin contract ID or deployment alias")
     .option("--token <string>", "Token contract ID or deployment alias")
@@ -109,4 +114,6 @@ export function createOrchestrateCommand(): Command {
         process.exitCode = 1;
       }
     });
+
+  return addNetworkOptions(command);
 }
