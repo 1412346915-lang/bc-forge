@@ -35,7 +35,7 @@ git clone https://github.com/YOUR_USERNAME/bc-forge.git
 cd bc-forge
 
 # Add upstream remote
-git remote add upstream https://github.com/p3ris0n/bc-forge.git
+git remote add upstream https://github.com/BCPathway/bc-forge.git
 
 # Install Rust dependencies
 rustup target add wasm32-unknown-unknown
@@ -54,7 +54,7 @@ npm run build
 
 ### 1. Find an Issue
 
-- Check the [Issues](https://github.com/p3ris0n/bc-forge/issues) tab
+- Check the [Issues](https://github.com/BCPathway/bc-forge/issues) tab
 - Look for labels:
   - `good-first-issue` — Perfect for newcomers
   - `smart-contract` — Rust/Soroban contract work
@@ -140,6 +140,8 @@ cd sdk && npm run build
 
 Running `cargo test -p bc-forge-admin` regenerates `contracts/admin/test_snapshots/` locally; these Soroban snapshots are generated outputs and must remain untracked.
 
+CI also runs `cargo audit` against `Cargo.lock` in the Dependency Audit job: if any dependency matches a known RustSec advisory, the check fails and blocks the merge. Upgrade the affected crate (or, only when the advisory genuinely cannot apply, add a narrowly scoped, commented ignore) before opening your PR.
+
 ### 5. Pull Request Process
 
 1. **Push your branch** to your fork
@@ -155,6 +157,7 @@ Running `cargo test -p bc-forge-admin` regenerates `contracts/admin/test_snapsho
 - [ ] Branch follows naming convention
 - [ ] Code passes `cargo fmt` and `cargo clippy`
 - [ ] All tests pass (`cargo test --tests`)
+- [ ] `cargo audit` reports no advisories on `Cargo.lock`
 - [ ] SDK compiles (`npm run build` in `sdk/`)
 - [ ] New functions have doc comments
 - [ ] README updated if applicable
@@ -178,11 +181,31 @@ Running `cargo test -p bc-forge-admin` regenerates `contracts/admin/test_snapsho
 - **Read-only methods** — Use simulation (no transaction needed)
 - **Write methods** — Build, simulate, sign, submit, poll
 
+### Generated Contract Bindings (#926)
+
+The SDK includes auto-generated TypeScript bindings in `sdk/src/generated/`
+produced by `stellar contract bindings typescript`. These must be regenerated
+whenever the Rust token contract changes:
+
+```bash
+# From the sdk/ directory
+npm run generate:bindings
+
+# Or from the repo root
+bash scripts/generate-sdk-bindings.sh
+```
+
+**Prerequisites:** Rust toolchain with `wasm32-unknown-unknown` target and
+[Stellar CLI 22.0+](https://developers.stellar.org/docs/tools/cli).
+
+CI will fail if the committed bindings are stale. Always regenerate and commit
+after contract changes.
+
 ## ❓ Questions?
 
-- Open a [Discussion](https://github.com/p3ris0n/bc-forge/discussions)
+- Open a [Discussion](https://github.com/BCPathway/bc-forge/discussions)
 - Check [Soroban docs](https://soroban.stellar.org/docs)
-- Review existing [closed issues](https://github.com/p3ris0n/bc-forge/issues?q=is%3Aclosed) for solutions
+- Review existing [closed issues](https://github.com/BCPathway/bc-forge/issues?q=is%3Aclosed) for solutions
 
 ---
 

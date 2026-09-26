@@ -75,6 +75,9 @@ jobs:
           CARGO_INCREMENTAL: 0
         run: cargo build --workspace --exclude bc-forge-e2e-tests --target wasm32-unknown-unknown --release
 
+      - name: Check WASM size budgets (#956)
+        run: python3 scripts/check_wasm_size.py
+
   # ─── TypeScript SDK CI ──────────────────────────────────────────────────
   sdk:
     name: TypeScript SDK
@@ -98,6 +101,83 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+  # ─── SDK Bindings Staleness Check (#926) ─────────────────────────────────
+  # Ensures the committed generated bindings match a fresh run of
+  # `stellar contract bindings typescript` against the latest WASM.
+  sdk-bindings:
+    name: SDK Bindings Staleness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bc-forge-contracts
+
+      - name: Install Stellar CLI system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libdbus-1-dev \
+            libudev-dev \
+            pkg-config
+
+      - name: Install Stellar CLI
+        run: cargo install stellar-cli --locked || cargo install soroban-cli --locked
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: sdk/package-lock.json
+
+      - name: Install SDK dependencies
+        run: npm ci
+        working-directory: sdk
+
+      - name: Generate bindings from fresh WASM
+        run: bash scripts/generate-sdk-bindings.sh
+
+      - name: Fail if committed bindings are stale
+        run: |
+          if ! git diff --exit-code sdk/src/generated/; then
+            echo "::error::SDK bindings are stale. Run 'npm run generate:bindings' in sdk/ and commit the result."
+            exit 1
+          fi
+
+  # ─── Indexer CI ─────────────────────────────────────────────────────────
+  indexer:
+    name: Indexer
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: indexer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: indexer/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Run tests
         run: npm test
@@ -130,6 +210,38 @@ jobs:
       - name: Run tests
         run: npm test
 
+  # ─── React Package CI (#896) ────────────────────────────────────────────
+  # @bc-forge/react wraps @bc-forge/sdk, so the workspace SDK is built first
+  # to provide the type declarations the react build consumes.
+  react:
+    name: React Package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: react
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: react/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build SDK dependency
+        run: npm run build --workspace @bc-forge/sdk
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
   # ─── Dependency audit (#770) ────────────────────────────────────────────
   # Verifies the workspace dependency graph resolves cleanly: cargo metadata
   # fails on manifest cycles or malformed feature declarations, and `cargo
@@ -158,3 +270,26 @@ jobs:
 
       - name: Resolve full dependency graph with all features
         run: cargo tree --workspace --all-features >/dev/null
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      # Fails the job when any crate in Cargo.lock matches a RustSec advisory.
+      - name: Audit Cargo.lock against RustSec advisories (#883)
+        run: cargo audit
+
+  # ─── Documentation link check (#348) ─────────────────────────────────────
+  docs-links:
+    name: Documentation Links
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Reject stale repository links in docs
+        run: python3 scripts/check_doc_links.py
