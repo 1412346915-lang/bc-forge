@@ -206,12 +206,26 @@ jobs:
       - name: Resolve full dependency graph with all features
         run: cargo tree --workspace --all-features >/dev/null
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+      - name: Install cargo-audit and cargo-deny
+        run: cargo install cargo-audit cargo-deny --locked
 
       # Fails the job when any crate in Cargo.lock matches a RustSec advisory.
       - name: Audit Cargo.lock against RustSec advisories (#883)
         run: cargo audit
+
+      # Fails the job on security advisories via cargo-deny (#958)
+      - name: Check Cargo advisories with cargo-deny (#958)
+        run: cargo deny check advisories
+
+      # Fails the job on high or critical production vulnerability findings (#958)
+      - name: Run npm audit gate on workspace packages (#958)
+        run: |
+          for pkg in sdk cli react indexer; do
+            if [ -d "$pkg" ]; then
+              echo "Auditing npm production dependencies in $pkg..."
+              (cd "$pkg" && npm audit --omit=dev --audit-level=high)
+            fi
+          done
 
   # ─── Documentation link check (#348) ─────────────────────────────────────
   docs-links:
