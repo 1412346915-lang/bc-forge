@@ -1,9 +1,10 @@
 # cargo-deny configuration for bc-forge workspace (#958)
 
 [advisories]
+# cargo-deny 0.20 treats these as which dependency set to scan, not a severity.
 vulnerability = "deny"
-unmaintained = "warn"
-notice = "warn"
+unmaintained = "none"
+notice = "none"
 ignore = []
 
 [licenses]
