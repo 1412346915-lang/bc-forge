@@ -205,16 +205,14 @@ mod reentrancy_guard;
 use bc_forge_ttl as ttl;
 use soroban_sdk::{contracterror, contracttype, Address, Env};
 #[cfg(test)]
-use soroban_sdk::{vec, BytesN, Map, String, Vec};
+use soroban_sdk::{vec, Map, String, Vec};
 mod address;
 mod multisig;
 mod rbac;
 
 pub use address::*;
-pub(crate) use multisig::_start_upgrade_timelock_if_quorate;
 pub use multisig::*;
 pub use rbac::*;
-pub(crate) use rbac::{_revoke_role, role_bit};
 
 /// Errors returned by the admin access-control module.
 ///
@@ -369,6 +367,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::multisig::_start_upgrade_timelock_if_quorate;
+    use crate::rbac::_revoke_role;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger;
