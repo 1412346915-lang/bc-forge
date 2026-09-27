@@ -2,9 +2,10 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { timingSafeEqual } from 'node:crypto';
 import { getPrismaClient } from './lib/prisma';
 import { logger } from './lib/logger';
+import { createApiRateLimiter, type ApiRateLimiterOptions } from './lib/rateLimit';
 
 /**
- * Authenticated indexer read API.
+ * Authenticated, rate-limited indexer read API.
  *
  * Every route below requires a shared secret supplied as a bearer token:
  *
@@ -51,10 +52,6 @@ export function requireApiToken(req: Request, res: Response, next: NextFunction)
 
   next();
 }
-
-const router = express.Router();
-
-router.use(requireApiToken);
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
@@ -302,97 +299,103 @@ export function jsonErrorHandler(
 }
 
 /**
- * GET /mints
- * Retrieve mint logs (paginated, optionally filtered).
+ * Builds the `/api/v1` read API router.
  *
- * Query params:
- *   address     — filter by `to` address
- *   from_ledger — include only rows with ledger >= this value
- *   limit       — page size (default 50, max 100)
- *   cursor      — opaque cursor from a previous response's `nextCursor`
- */
-router.get(
-  '/mints',
-  asyncHandler(async (req, res) => {
-    const address = parseAddress(req.query);
-    const fromLedger = parseFromLedger(req.query);
-    if (fromLedger === null) {
-      res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
-      return;
-    }
-    const where = buildMintWhere(address, fromLedger);
-    await handlePaginatedList(req, res, getPrismaClient().mint, where);
-  }),
-);
-
-/**
- * GET /transfers
- * Retrieve transfer logs (paginated, optionally filtered).
+ * Every route on this router is guarded by a single shared per-IP rate limiter
+ * (60 requests per minute by default, configurable with
+ * `INDEXER_RATE_LIMIT_WINDOW_MS` and `INDEXER_RATE_LIMIT_MAX`). Requests over
+ * the limit receive HTTP 429 with a JSON body, before any handler runs.
  *
- * Query params:
- *   address     — filter by `from` OR `to` address
- *   from_ledger — include only rows with ledger >= this value
- *   limit       — page size (default 50, max 100)
- *   cursor      — opaque cursor from a previous response's `nextCursor`
+ * `GET /health` is registered on the app in `index.ts`, outside this router, so
+ * uptime probes are never counted against the limit.
  */
-router.get(
-  '/transfers',
-  asyncHandler(async (req, res) => {
-    const address = parseAddress(req.query);
-    const fromLedger = parseFromLedger(req.query);
-    if (fromLedger === null) {
-      res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
-      return;
-    }
-    const where = buildTransferWhere(address, fromLedger);
-    await handlePaginatedList(req, res, getPrismaClient().transfer, where);
-  }),
-);
+export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Router {
+  const router = express.Router();
 
-/**
- * GET /burns
- * Retrieve burn logs (paginated, optionally filtered).
- *
- * Query params:
- *   address     — filter by `from` address
- *   from_ledger — include only rows with ledger >= this value
- *   limit       — page size (default 50, max 100)
- *   cursor      — opaque cursor from a previous response's `nextCursor`
- */
-router.get(
-  '/burns',
-  asyncHandler(async (req, res) => {
-    const address = parseAddress(req.query);
-    const fromLedger = parseFromLedger(req.query);
-    if (fromLedger === null) {
-      res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
-      return;
-    }
-    const where = buildBurnWhere(address, fromLedger);
-    await handlePaginatedList(req, res, getPrismaClient().burn, where);
-  }),
-);
+  // Applies to every route below. Routes added by other modules before this
+  // point would be counted too, but this router owns all of `/api/v1`.
+  router.use(createApiRateLimiter(options));
 
-/**
- * GET /stats
- * Retrieve basic token operation stats.
- */
-router.get(
-  '/stats',
-  asyncHandler(async (req, res) => {
-    const prisma = getPrismaClient();
-    const [mintCount, transferCount, burnCount] = await Promise.all([
-      prisma.mint.count(),
-      prisma.transfer.count(),
-      prisma.burn.count(),
-    ]);
+  // Every route also requires the configured bearer token.
+  router.use(requireApiToken);
 
-    res.json({
-      mintCount,
-      transferCount,
-      burnCount,
-    });
-  }),
-);
+  /**
+   * GET /mints
+   * Retrieve mint logs (paginated, optionally filtered).
+   */
+  router.get(
+    '/mints',
+    asyncHandler(async (req, res) => {
+      const address = parseAddress(req.query);
+      const fromLedger = parseFromLedger(req.query);
+      if (fromLedger === null) {
+        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        return;
+      }
+      const where = buildMintWhere(address, fromLedger);
+      await handlePaginatedList(req, res, getPrismaClient().mint, where);
+    }),
+  );
 
-export default router;
+  /**
+   * GET /transfers
+   * Retrieve transfer logs (paginated, optionally filtered).
+   */
+  router.get(
+    '/transfers',
+    asyncHandler(async (req, res) => {
+      const address = parseAddress(req.query);
+      const fromLedger = parseFromLedger(req.query);
+      if (fromLedger === null) {
+        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        return;
+      }
+      const where = buildTransferWhere(address, fromLedger);
+      await handlePaginatedList(req, res, getPrismaClient().transfer, where);
+    }),
+  );
+
+  /**
+   * GET /burns
+   * Retrieve burn logs (paginated, optionally filtered).
+   */
+  router.get(
+    '/burns',
+    asyncHandler(async (req, res) => {
+      const address = parseAddress(req.query);
+      const fromLedger = parseFromLedger(req.query);
+      if (fromLedger === null) {
+        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        return;
+      }
+      const where = buildBurnWhere(address, fromLedger);
+      await handlePaginatedList(req, res, getPrismaClient().burn, where);
+    }),
+  );
+
+  /**
+   * GET /stats
+   * Retrieve basic token operation stats.
+   */
+  router.get(
+    '/stats',
+    asyncHandler(async (req, res) => {
+      const prisma = getPrismaClient();
+      const [mintCount, transferCount, burnCount] = await Promise.all([
+        prisma.mint.count(),
+        prisma.transfer.count(),
+        prisma.burn.count(),
+      ]);
+
+      res.json({
+        mintCount,
+        transferCount,
+        burnCount,
+      });
+    }),
+  );
+
+  return router;
+}
+
+export default createApiRouter();
