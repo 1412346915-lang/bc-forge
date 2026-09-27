@@ -1,14 +1,13 @@
-# cargo-deny configuration for bc-forge workspace (#958)
+# cargo-deny 0.20 configuration for bc-forge (#958).
+# See https://github.com/EmbarkStudios/cargo-deny/pull/611 for the v2 schema.
 
 [advisories]
-# cargo-deny 0.20 treats these as which dependency set to scan, not a severity.
-vulnerability = "deny"
-unmaintained = "none"
-notice = "none"
+version = 2
+yanked = "warn"
 ignore = []
 
 [licenses]
-unlicensed = "deny"
+version = 2
 allow = [
     "MIT",
     "Apache-2.0",
@@ -16,6 +15,7 @@ allow = [
     "Unicode-3.0",
     "CC0-1.0",
 ]
+confidence-threshold = 0.8
 
 [bans]
 multiple-versions = "warn"
