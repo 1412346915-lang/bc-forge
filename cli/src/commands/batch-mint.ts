@@ -49,8 +49,8 @@ export function createBatchMintCommand(): Command {
 
   addNetworkOptions(cmd);
 
-  cmd.action((opts: { recipients?: BatchMintRecipient[] }) => {
-    const recipients = opts.recipients ?? [];
+  cmd.action((opts: { recipient?: BatchMintRecipient[] }) => {
+    const recipients = opts.recipient ?? [];
     if (recipients.length === 0) {
       throw new Error(
         "batch-mint requires at least one --recipient <address>:<amount>.",

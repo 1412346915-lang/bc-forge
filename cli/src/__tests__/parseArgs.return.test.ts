@@ -90,7 +90,7 @@ describe("parseArgs return contract (#350)", () => {
     expect(opts).toBeDefined();
     expect(opts!.contractId).toBe("CABC123");
     expect(opts!.source).toBe("S...");
-    expect(opts!.recipients).toEqual([
+    expect(opts!.recipient).toEqual([
       {
         to: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
         amount: "10",
