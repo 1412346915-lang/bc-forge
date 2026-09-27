@@ -178,7 +178,9 @@ describe('doctor command (#940)', () => {
 
     it('is not allOk when any check fails', async () => {
       const result = await runDoctor({
-        versionRunner: stubVersionRunner(() => 'rustc 1.70.0 (x)'),
+        versionRunner: stubVersionRunner((command) =>
+          command === 'stellar' ? 'stellar 22.0.0 (main)' : 'rustc 1.70.0 (x)'
+        ),
         rpc: stubRpc(undefined, () => ({ entries: [{ liveUntilLedgerSeq: 10 }] })),
         contracts: [{ name: 'token', deployment: { contractId: TOKEN_ID } }]
       });

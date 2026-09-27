@@ -12,11 +12,11 @@
 
 use soroban_sdk::{contracttype, vec, Address, BytesN, Env, Map, String, Vec};
 
+use crate::address::require_non_zero_address;
 use crate::events;
+use crate::rbac::{get_admin, has_admin, require_admin};
 use crate::reentrancy_guard;
 use crate::{extend_instance_ttl, extend_storage_ttl_for_key, AdminError, AdminKey};
-use crate::address::require_non_zero_address;
-use crate::rbac::{get_admin, has_admin, require_admin};
 
 /// Mandatory delay between the moment a proposal reaches quorum and the moment
 /// [`execute_upgrade`] may act on it, in seconds (24 hours).
@@ -29,6 +29,12 @@ use crate::rbac::{get_admin, has_admin, require_admin};
 /// @notice The duration in seconds (86,400s / 24 hours) for the proposal execution timelock.
 /// @dev Mandatory delay applied once quorum is reached before an upgrade can be executed.
 pub const TIMELOCK_DELAY_SECS: u64 = 24 * 60 * 60;
+
+/// Default lifetime of a legacy [`Proposal`], in ledgers.
+///
+/// A proposal created at ledger `N` can no longer be executed from ledger
+/// `N + PROPOSAL_EXPIRY_LEDGERS` onwards. 600 ledgers is about 50 minutes.
+pub const PROPOSAL_EXPIRY_LEDGERS: u32 = 600;
 
 /// A multi-sig governance proposal.
 ///
@@ -46,6 +52,11 @@ pub struct Proposal {
     pub approvals: Vec<Address>,
     /// Whether the proposal has been executed.
     pub executed: bool,
+    /// Last ledger at which the proposal may execute. `None` means the
+    /// proposal predates expiry and does not expire.
+    pub expiry_ledger: Option<u32>,
+    /// Whether the creator withdrew the proposal. Terminal.
+    pub cancelled: bool,
 }
 
 /// Lifecycle state of an [`UpgradeProposal`].
@@ -239,6 +250,12 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
         description,
         approvals: vec![env, creator],
         executed: false,
+        expiry_ledger: Some(
+            env.ledger()
+                .sequence()
+                .saturating_add(PROPOSAL_EXPIRY_LEDGERS),
+        ),
+        cancelled: false,
     };
     env.storage()
         .instance()
@@ -273,6 +290,9 @@ pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
 
     if proposal.executed {
         soroban_sdk::panic_with_error!(env, AdminError::ProposalAlreadyExecuted);
+    }
+    if proposal.cancelled {
+        soroban_sdk::panic_with_error!(env, AdminError::ProposalCancelled);
     }
     if proposal.approvals.contains(&admin) {
         soroban_sdk::panic_with_error!(env, AdminError::ProposalAlreadyApproved);
@@ -325,6 +345,12 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
     if proposal.executed {
         soroban_sdk::panic_with_error!(env, AdminError::ProposalAlreadyExecuted);
     }
+    if proposal.cancelled {
+        soroban_sdk::panic_with_error!(env, AdminError::ProposalCancelled);
+    }
+    if _proposal_expired(env, &proposal) {
+        soroban_sdk::panic_with_error!(env, AdminError::ProposalExpired);
+    }
     if !is_proposal_ready(env, proposal_id) {
         soroban_sdk::panic_with_error!(env, AdminError::ThresholdNotMet);
     }
@@ -334,6 +360,48 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
         .instance()
         .set(&AdminKey::Proposal(proposal_id), &proposal);
     extend_instance_ttl(env);
+}
+
+fn _proposal_expired(env: &Env, proposal: &Proposal) -> bool {
+    match proposal.expiry_ledger {
+        Some(expiry_ledger) => env.ledger().sequence() > expiry_ledger,
+        None => false,
+    }
+}
+
+/// Cancels a not-yet-executed legacy governance proposal.
+pub fn cancel_legacy_proposal(
+    env: &Env,
+    caller: Address,
+    proposal_id: u64,
+) -> Result<(), AdminError> {
+    let _reentrancy_guard = reentrancy_guard::enter(env);
+    caller.require_auth();
+
+    let mut proposal: Proposal = env
+        .storage()
+        .instance()
+        .get(&AdminKey::Proposal(proposal_id))
+        .ok_or(AdminError::ProposalNotFound)?;
+
+    if caller != proposal.creator {
+        return Err(AdminError::Unauthorized);
+    }
+    if proposal.executed {
+        return Err(AdminError::ProposalAlreadyExecuted);
+    }
+    if proposal.cancelled || _proposal_expired(env, &proposal) {
+        return Err(AdminError::ProposalNotCancellable);
+    }
+
+    proposal.cancelled = true;
+    env.storage()
+        .instance()
+        .set(&AdminKey::Proposal(proposal_id), &proposal);
+    extend_instance_ttl(env);
+
+    events::emit_proposal_cancelled(env, &caller, proposal_id);
+    Ok(())
 }
 
 /// Records the unlock time for `proposal_id` if it has reached quorum and no
@@ -502,6 +570,12 @@ fn execute_upgrade_inner(
 
     if proposal.executed {
         return Err(AdminError::ProposalAlreadyExecuted);
+    }
+    if proposal.cancelled {
+        return Err(AdminError::ProposalCancelled);
+    }
+    if _proposal_expired(env, &proposal) {
+        return Err(AdminError::ProposalExpired);
     }
 
     // Quorum check: enough unique approvals must have been collected.

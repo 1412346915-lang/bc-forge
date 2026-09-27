@@ -58,6 +58,8 @@
 //! | `22` | `RoleAlreadyGranted` | `grant_role` on a role the address already holds |
 //! | `21` | `BatchLengthMismatch` | `execute_upgrade_batch` given unequal id/hash vectors |
 //! | `22` | `RoleAlreadyGranted` | `validate_role_not_granted` / `grant_role_checked` when the role is already held |
+//! | `23` | `ProposalExpired` | `execute_upgrade` / `execute_upgrade_batch` past the proposal expiry ledger |
+//! | `24` | `ProposalCancelled` | approve/execute on a legacy proposal cancelled by its creator |
 //!
 //! ## Event Emissions
 //!
@@ -167,6 +169,9 @@
 //!   on the current contract; the first failure aborts the remainder.
 //!
 //! ### Cancellation
+//! - [`cancel_legacy_proposal`] (#916) lets the creator of a legacy
+//!   [`Proposal`] withdraw it before it executes or expires; a cancelled or
+//!   expired proposal can never be approved or executed again.
 //! - [`cancel_proposal`] (#662) lets the proposer of an [`UpgradeProposal`]
 //!   withdraw it before it executes. Only `UpgradeProposal::proposer` may
 //!   cancel; every other caller gets [`AdminError::NotProposer`], even an
@@ -270,6 +275,12 @@ pub enum AdminError {
     BatchLengthMismatch = 21,
     /// The target address already holds the role being granted (#768).
     RoleAlreadyGranted = 22,
+    /// The proposal's expiry ledger has passed: it can no longer execute.
+    /// Proposals live for [`PROPOSAL_EXPIRY_LEDGERS`] ledgers from creation.
+    ProposalExpired = 23,
+    /// The proposal was withdrawn by its creator via `cancel_legacy_proposal`
+    /// and can no longer be approved or executed.
+    ProposalCancelled = 24,
 }
 
 /// Storage keys for the access-control layer.
@@ -437,6 +448,14 @@ mod tests {
 
         pub fn mark_executed(env: Env, proposal_id: u64) {
             super::mark_executed(&env, proposal_id);
+        }
+
+        pub fn cancel_legacy_proposal(
+            env: Env,
+            caller: Address,
+            proposal_id: u64,
+        ) -> Result<(), AdminError> {
+            super::cancel_legacy_proposal(&env, caller, proposal_id)
         }
 
         pub fn execute_upgrade(

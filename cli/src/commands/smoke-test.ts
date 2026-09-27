@@ -10,6 +10,7 @@ import {
 import { addNetworkOptions } from "../network.js";
 import { prepareSignAndSubmit, type PrepareSignSubmitResult } from "../utils/soroban-tx.js";
 import logger from "../utils/logger.js";
+import { resolveContractIdOption } from "../utils/registry.js";
 
 /** Default delay between passes in --watch mode (#940). */
 export const DEFAULT_WATCH_INTERVAL_MS = 15000;
@@ -56,7 +57,7 @@ export function createSmokeTestCommand(): Command {
     .description("Run a quick ping test against a live contract (mint/transfer)")
     .requiredOption(
       "--contract-id <id>",
-      "Contract ID of the deployed token to test"
+      "Contract ID, or a deployment alias for the selected network"
     )
     .requiredOption("--source <secret>", "Admin/source account secret key")
     .option("--recipient <address>", "Recipient address (auto-generated if omitted)")
@@ -75,16 +76,26 @@ export function createSmokeTestCommand(): Command {
 
   addNetworkOptions(cmd);
 
-  cmd.action(async (opts) => {
-    if (opts.watch) {
-      await watchSmokeTest({
-        intervalMs: Number(opts.interval) || DEFAULT_WATCH_INTERVAL_MS,
-        once: () => runSmokeTest(opts),
-        onResult: reportSmokeTestResult,
-      });
-      return;
+  cmd.action(async (opts, command) => {
+    try {
+      const contractId = resolveContractIdOption(command, opts.contractId);
+      const resolved = {
+        ...opts,
+        contractId: contractId ?? opts.contractId,
+      };
+      if (opts.watch) {
+        await watchSmokeTest({
+          intervalMs: Number(opts.interval) || DEFAULT_WATCH_INTERVAL_MS,
+          once: () => runSmokeTest(resolved),
+          onResult: reportSmokeTestResult,
+        });
+        return;
+      }
+      await runSmokeTest(resolved);
+    } catch (err: unknown) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
     }
-    await runSmokeTest(opts);
   });
 
   return cmd;
