@@ -2,7 +2,11 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { BurnScreen } from './BurnScreen';
-import * as forgeContext from '../context';
+import { useWallet } from '../context';
+
+jest.mock('../context', () => ({
+  useWallet: jest.fn(() => ({ connected: false })),
+}));
 
 const mockUseBalance = jest.fn();
 const mockBurn = jest.fn();
@@ -21,8 +25,8 @@ const ADDRESS = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFTGWEBUSAVCBCY42YOXT';
 
 describe('BurnScreen', () => {
   beforeEach(() => {
-    jest.restoreAllMocks();
     jest.clearAllMocks();
+    (useWallet as jest.Mock).mockReturnValue({ connected: false });
     mockUseBalance.mockReturnValue({ data: null, loading: false, error: null });
     mockBurn.mockResolvedValue({ success: true, hash: '0xburnhash' });
     mockBurnState.error = null;
@@ -72,7 +76,7 @@ describe('BurnScreen', () => {
   });
 
   it('uses the public key from the wallet context for balance and burn', async () => {
-    jest.spyOn(forgeContext, 'useWallet').mockReturnValue({
+    (useWallet as jest.Mock).mockReturnValue({
       connected: true,
       publicKey: ADDRESS,
     });
@@ -92,7 +96,7 @@ describe('BurnScreen', () => {
   });
 
   it('stays disconnected when the wallet context is not connected', () => {
-    jest.spyOn(forgeContext, 'useWallet').mockReturnValue({ connected: false });
+    (useWallet as jest.Mock).mockReturnValue({ connected: false });
     mockUseBalance.mockReturnValue({ data: 500n, loading: false, error: null });
 
     render(<BurnScreen />);
