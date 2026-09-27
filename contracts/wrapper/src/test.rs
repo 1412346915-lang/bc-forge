@@ -1,4 +1,4 @@
-use crate::{VaultState, WrapperContract, WrapperContractClient, WrapperError};
+use crate::{CooldownConfig, VaultState, WrapperContract, WrapperContractClient, WrapperError};
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Ledger;
@@ -2430,4 +2430,90 @@ fn test_rescue_tokens_rejects_invalid_amount() {
     assert_eq!(result, Err(Ok(WrapperError::InsufficientBalance)));
 
     assert_eq!(foreign.balance(&recovery), 0);
+}
+
+// ─── Cooldown and Emergency Cap Tests ───────────────────────────────────────
+
+#[test]
+fn test_cooldown_off_preserves_immediate_withdrawals() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.deposit(&user, &1_000_000);
+    assert_eq!(wrapper.balance(&user), 1_000_000);
+
+    let tokens_out = wrapper.withdraw(&user, &1_000_000);
+    assert_eq!(tokens_out, 1_000_000);
+    assert_eq!(wrapper.balance(&user), 0);
+    assert_eq!(wrapper.supply(), 0);
+    assert_eq!(underlying.balance(&user), 10_000_000);
+}
+
+#[test]
+fn test_cooldown_on_delays_payout_until_release_ledger() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+
+    let config = CooldownConfig {
+        enabled: true,
+        cooldown_ledgers: 10,
+        emergency_cap: 0,
+        emergency_window_ledgers: 0,
+    };
+    wrapper.set_cooldown_config(&admin, &config);
+
+    wrapper.deposit(&user, &1_000_000);
+
+    let res = wrapper.withdraw(&user, &1_000_000);
+    assert_eq!(res, 0);
+
+    assert_eq!(wrapper.balance(&user), 0);
+    assert_eq!(underlying.balance(&user), 9_000_000);
+
+    let queued = wrapper.get_queued_withdrawal(&user).unwrap();
+    assert_eq!(queued.amount, 1_000_000);
+    assert_eq!(queued.release_ledger, env.ledger().sequence() + 10);
+
+    let claim_early = wrapper.try_claim_withdrawal(&user);
+    assert_eq!(claim_early, Err(Ok(WrapperError::CooldownNotMet)));
+
+    env.ledger().set_sequence_number(queued.release_ledger + 1);
+
+    let claimed_tokens = wrapper.claim_withdrawal(&user);
+    assert_eq!(claimed_tokens, 1_000_000);
+    assert_eq!(underlying.balance(&user), 10_000_000);
+
+    let claim_again = wrapper.try_claim_withdrawal(&user);
+    assert_eq!(claim_again, Err(Ok(WrapperError::NoQueuedWithdrawal)));
+}
+
+#[test]
+fn test_emergency_cap_blocks_excessive_withdrawals_in_window() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
+
+    let config = CooldownConfig {
+        enabled: false,
+        cooldown_ledgers: 0,
+        emergency_cap: 500_000,
+        emergency_window_ledgers: 100,
+    };
+    wrapper.set_cooldown_config(&admin, &config);
+
+    wrapper.deposit(&user, &1_000_000);
+
+    let first = wrapper.withdraw(&user, &400_000);
+    assert_eq!(first, 400_000);
+
+    let second = wrapper.try_withdraw(&user, &200_000);
+    assert_eq!(second, Err(Ok(WrapperError::EmergencyCapExceeded)));
+
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + 105);
+
+    let third = wrapper.withdraw(&user, &200_000);
+    assert_eq!(third, 200_000);
 }
