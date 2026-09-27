@@ -75,6 +75,47 @@ describe("parseArgs return contract (#350)", () => {
     await expect(quietParseArgs(["--help"])).resolves.toBeUndefined();
   });
 
+  it("parses batch-mint recipients into the options returned to the caller", async () => {
+    const opts = await quietParseArgs([
+      "batch-mint",
+      "--contract-id",
+      "CABC123",
+      "--source",
+      "S...",
+      "--recipient",
+      "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF:10",
+      "--recipient",
+      "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB:20",
+    ]);
+    expect(opts).toBeDefined();
+    expect(opts!.contractId).toBe("CABC123");
+    expect(opts!.source).toBe("S...");
+    expect(opts!.recipients).toEqual([
+      {
+        to: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        amount: "10",
+      },
+      {
+        to: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount: "20",
+      },
+    ]);
+  });
+
+  it("rejects a batch-mint recipient that is not address:amount", async () => {
+    await expect(
+      quietParseArgs([
+        "batch-mint",
+        "--contract-id",
+        "CABC123",
+        "--source",
+        "S...",
+        "--recipient",
+        "not-a-recipient",
+      ]),
+    ).rejects.toThrow(/Expected <address>:<amount>/);
+  });
+
   it("does not silently swallow a parse error", async () => {
     await expect(
       quietParseArgs(["upgrade", "--network", "devnet", "--wasm", "./t.wasm", "--contract-id", "CX", "--source", "S..."]),

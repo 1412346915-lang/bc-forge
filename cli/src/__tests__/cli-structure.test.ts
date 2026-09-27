@@ -29,6 +29,7 @@ describe("CLI TypeScript project structure (#683)", () => {
         "init-superadmin",
         "connect",
         "orchestrate",
+        "batch-mint",
       ])
     );
   });
