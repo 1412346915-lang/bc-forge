@@ -1,6 +1,7 @@
-use crate::{BcForgeToken, BcForgeTokenClient, DataKey, TokenError};
+use crate::{AllowanceData, BatchOp, BcForgeToken, BcForgeTokenClient, DataKey, TokenError};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
+use soroban_sdk::testutils::Ledger as _;
 use soroban_sdk::{symbol_short, vec, Address, BytesN, Env, String, TryIntoVal, Val};
 
 fn setup_contract(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
@@ -69,12 +70,16 @@ fn test_initialize_emits_expected_events() {
     let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
     assert_eq!(
         data_vec.len(),
-        3,
-        "data should have 3 elements (decimal, name, symbol), confirming admin is in topics"
+        4,
+        "data should have 4 elements (decimal, name, symbol, version), confirming admin is in topics"
     );
 
     let decimal: u32 = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
     assert_eq!(decimal, 7);
+
+    // #924 — every event data tuple ends with the schema version.
+    let version: u32 = data_vec.get(3).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(version, 1, "init event must carry schema version 1");
 }
 
 #[test]
@@ -671,6 +676,148 @@ fn test_unpause_when_not_paused_returns_error() {
     assert_eq!(result, Err(Ok(TokenError::NotPaused)));
 }
 
+// ─── #913: AllowanceData migration from legacy storage ───────────────────────
+
+fn write_legacy_allowance(
+    env: &Env,
+    contract_id: &Address,
+    owner: &Address,
+    spender: &Address,
+    amount: i128,
+    expiration_ledger: u32,
+) {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Allowance(owner.clone(), spender.clone()), &amount);
+        if expiration_ledger > 0 {
+            env.storage().persistent().set(
+                &DataKey::AllowanceExp(owner.clone(), spender.clone()),
+                &expiration_ledger,
+            );
+        }
+    });
+}
+
+fn has_legacy_allowance_exp(
+    env: &Env,
+    contract_id: &Address,
+    owner: &Address,
+    spender: &Address,
+) -> bool {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .has(&DataKey::AllowanceExp(owner.clone(), spender.clone()))
+    })
+}
+
+fn read_allowance_struct(
+    env: &Env,
+    contract_id: &Address,
+    owner: &Address,
+    spender: &Address,
+) -> Option<AllowanceData> {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .get::<_, AllowanceData>(&DataKey::Allowance(owner.clone(), spender.clone()))
+    })
+}
+
+#[test]
+fn test_legacy_allowance_migrates_on_first_read() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, contract_id) = setup_contract(&env);
+    let admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.mint(&admin, &owner, &1_000);
+    write_legacy_allowance(&env, &contract_id, &owner, &spender, 400, 0);
+
+    assert_eq!(client.allowance(&owner, &spender), 400);
+    assert!(
+        !has_legacy_allowance_exp(&env, &contract_id, &owner, &spender),
+        "AllowanceExp must be removed after migration"
+    );
+    let data = read_allowance_struct(&env, &contract_id, &owner, &spender)
+        .expect("AllowanceData must be persisted");
+    assert_eq!(data.amount, 400);
+    assert_eq!(data.expiration_ledger, 0);
+}
+
+#[test]
+fn test_legacy_allowance_migrates_and_spends_once() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, contract_id) = setup_contract(&env);
+    let admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &owner, &1_000);
+    write_legacy_allowance(&env, &contract_id, &owner, &spender, 250, u32::MAX);
+
+    assert!(client
+        .try_transfer_from(&spender, &owner, &recipient, &100)
+        .is_ok());
+    assert_eq!(client.allowance(&owner, &spender), 150);
+    assert!(
+        !has_legacy_allowance_exp(&env, &contract_id, &owner, &spender),
+        "legacy expiration key must not remain after spend"
+    );
+}
+
+#[test]
+fn test_expired_allowance_cannot_transfer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, contract_id) = setup_contract(&env);
+    let admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &owner, &1_000);
+    env.ledger().set_sequence_number(10);
+    let exp_ledger = env.ledger().sequence();
+    write_legacy_allowance(&env, &contract_id, &owner, &spender, 500, exp_ledger);
+    env.ledger().set_sequence_number(exp_ledger + 1);
+
+    assert_eq!(client.allowance(&owner, &spender), 0);
+    let result = client.try_transfer_from(&spender, &owner, &recipient, &1);
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::InsufficientAllowance as u32
+        )))
+    );
+}
+
+#[test]
+fn test_fresh_approve_persists_only_allowance_data() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, contract_id) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.approve(&owner, &spender, &777, &123_456);
+
+    assert!(
+        !has_legacy_allowance_exp(&env, &contract_id, &owner, &spender),
+        "approve must not write AllowanceExp"
+    );
+    let data = read_allowance_struct(&env, &contract_id, &owner, &spender)
+        .expect("approve must write AllowanceData");
+    assert_eq!(data.amount, 777);
+    assert_eq!(data.expiration_ledger, 123_456);
+}
+
 // ─── #762: transfer / transfer_from pause hooks ───────────────────────────────
 
 #[test]
@@ -768,4 +915,261 @@ fn test_transfer_and_transfer_from_resume_after_unpause() {
         .is_ok());
     assert_eq!(client.balance(&owner), 875);
     assert_eq!(client.balance(&recipient), 125);
+}
+
+// ─── #912: execute_from_contract batch execution tests ───────────────────────
+
+#[test]
+fn test_execute_from_contract_happy_path() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let wallet = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &wallet, &1000);
+    assert_eq!(client.get_nonce(&wallet), 0);
+
+    let operations = vec![
+        &env,
+        BatchOp::Approve(spender.clone(), 300, 500),
+        BatchOp::Transfer(recipient.clone(), 250),
+    ];
+
+    let result = client.try_execute_from_contract(&wallet, &operations, &0, &0);
+    assert!(result.is_ok());
+
+    // Both approve allowance and transfer balance land
+    assert_eq!(client.allowance(&wallet, &spender), 300);
+    assert_eq!(client.balance(&wallet), 750);
+    assert_eq!(client.balance(&recipient), 250);
+    assert_eq!(client.get_nonce(&wallet), 1);
+}
+
+#[test]
+fn test_execute_from_contract_expired_payload() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let wallet = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &wallet, &1000);
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 100;
+    });
+
+    let operations = vec![&env, BatchOp::Transfer(recipient, 100)];
+
+    // max_ledger is 50, but current ledger is 100
+    let result = client.try_execute_from_contract(&wallet, &operations, &0, &50);
+    assert_eq!(result, Err(Ok(TokenError::PayloadExpired)));
+    assert_eq!(client.get_nonce(&wallet), 0);
+}
+
+#[test]
+fn test_execute_from_contract_replayed_payload() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let wallet = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &wallet, &1000);
+
+    let operations = vec![&env, BatchOp::Transfer(recipient.clone(), 100)];
+
+    // First execution with nonce 0 succeeds
+    let result1 = client.try_execute_from_contract(&wallet, &operations, &0, &0);
+    assert!(result1.is_ok());
+    assert_eq!(client.balance(&recipient), 100);
+    assert_eq!(client.get_nonce(&wallet), 1);
+
+    // Replay attempt with same nonce 0 fails with PayloadReplayed
+    let result2 = client.try_execute_from_contract(&wallet, &operations, &0, &0);
+    assert_eq!(result2, Err(Ok(TokenError::PayloadReplayed)));
+    assert_eq!(client.balance(&recipient), 100);
+}
+
+#[test]
+fn test_execute_from_contract_empty_batch() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let wallet = Address::generate(&env);
+
+    let operations = vec![&env];
+
+    let result = client.try_execute_from_contract(&wallet, &operations, &0, &0);
+    assert_eq!(result, Err(Ok(TokenError::BatchEmpty)));
+}
+
+#[test]
+fn test_execute_from_contract_over_cap_batch() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let wallet = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    // Create a batch of 9 operations (cap is 8)
+    let operations = vec![
+        &env,
+        BatchOp::Transfer(recipient.clone(), 1),
+        BatchOp::Transfer(recipient.clone(), 1),
+        BatchOp::Transfer(recipient.clone(), 1),
+        BatchOp::Transfer(recipient.clone(), 1),
+        BatchOp::Transfer(recipient.clone(), 1),
+        BatchOp::Transfer(recipient.clone(), 1),
+        BatchOp::Transfer(recipient.clone(), 1),
+        BatchOp::Transfer(recipient.clone(), 1),
+        BatchOp::Transfer(recipient.clone(), 1),
+    ];
+
+    let result = client.try_execute_from_contract(&wallet, &operations, &0, &0);
+    assert_eq!(result, Err(Ok(TokenError::BatchTooLarge)));
+}
+
+#[test]
+fn test_execute_from_contract_admin_function_rejected_at_enum_level() {
+    let env = Env::default();
+    let spender = Address::generate(&env);
+
+    let approve_op = BatchOp::Approve(spender.clone(), 100, 0);
+    let transfer_op = BatchOp::Transfer(spender, 50);
+
+    // Verify exhaustive matching on BatchOp enum variants.
+    // Compile-time safety guarantees admin operations (e.g., mint, pause, upgrade, set_max_supply)
+    // cannot be represented in BatchOp.
+    match &approve_op {
+        BatchOp::Approve(_, amount, _) => assert_eq!(*amount, 100),
+        BatchOp::Transfer(_, _) => panic!("expected Approve variant"),
+    }
+
+    match &transfer_op {
+        BatchOp::Transfer(_, amount) => assert_eq!(*amount, 50),
+        BatchOp::Approve(_, _, _) => panic!("expected Transfer variant"),
+    }
+
+    // Verify BatchOp count of enum variants is strictly limited to 2
+    let ops = vec![&env, approve_op, transfer_op];
+    assert_eq!(ops.len(), 2);
+}
+
+// ─── rescue_tokens (#921) ────────────────────────────────────────────────────
+
+#[test]
+fn test_rescue_tokens_admin_recovers_foreign_token() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin) = setup(&env);
+
+    // A foreign SEP-41 token gets registered and "accidentally" sent to the
+    // token contract. Minting it to the token contract's own address makes the
+    // contract hold a balance of a token it does not issue.
+    let foreign_id = env.register(BcForgeToken, ());
+    let foreign = BcForgeTokenClient::new(&env, &foreign_id);
+    let foreign_admin = Address::generate(&env);
+    foreign.initialize(
+        &foreign_admin,
+        &7,
+        &String::from_str(&env, "Foreign"),
+        &String::from_str(&env, "FRG"),
+    );
+    let recovery = Address::generate(&env);
+    foreign.mint(&foreign_admin, &client.address, &5_000);
+
+    assert_eq!(foreign.balance(&client.address), 5_000);
+
+    // Admin rescues the whole stranded balance to the recovery address.
+    client.rescue_tokens(&admin, &foreign_id, &recovery, &5_000);
+
+    assert_eq!(foreign.balance(&client.address), 0);
+    assert_eq!(foreign.balance(&recovery), 5_000);
+
+    // The token's own accounting is untouched: supply, balances, nothing moved.
+    assert_eq!(client.supply(), 0);
+}
+
+#[test]
+fn test_rescue_tokens_rejects_non_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin) = setup(&env);
+
+    let foreign_id = env.register(BcForgeToken, ());
+    let foreign = BcForgeTokenClient::new(&env, &foreign_id);
+    let foreign_admin = Address::generate(&env);
+    foreign.initialize(
+        &foreign_admin,
+        &7,
+        &String::from_str(&env, "Foreign"),
+        &String::from_str(&env, "FRG"),
+    );
+    foreign.mint(&foreign_admin, &client.address, &5_000);
+
+    let stranger = Address::generate(&env);
+    let recovery = Address::generate(&env);
+
+    let result = client.try_rescue_tokens(&stranger, &foreign_id, &recovery, &5_000);
+    // The admin-crate UnauthorizedRole trap does not decode into TokenError,
+    // so only the error-ness is asserted here.
+    assert!(result.is_err());
+
+    // Nothing moved.
+    assert_eq!(foreign.balance(&client.address), 5_000);
+    assert_eq!(foreign.balance(&recovery), 0);
+}
+
+#[test]
+fn test_rescue_tokens_rejects_own_token() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, contract_id) = setup_contract(&env);
+    let admin = init_default(&env, &client);
+
+    // Give the contract a balance of its own token so the case is realistic:
+    // this is exactly the user money the hatch must never be able to drain.
+    client.mint(&admin, &admin, &1_000);
+    client.transfer(&admin, &contract_id, &100);
+
+    let recovery = Address::generate(&env);
+    let result = client.try_rescue_tokens(&admin, &contract_id, &recovery, &100);
+    assert_eq!(result, Err(Ok(TokenError::UnknownToken)));
+
+    // The accounted balance is still there.
+    assert_eq!(client.balance(&contract_id), 100);
+}
+
+#[test]
+fn test_rescue_tokens_rejects_invalid_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin) = setup(&env);
+
+    let foreign_id = env.register(BcForgeToken, ());
+    let foreign = BcForgeTokenClient::new(&env, &foreign_id);
+    let foreign_admin = Address::generate(&env);
+    foreign.initialize(
+        &foreign_admin,
+        &7,
+        &String::from_str(&env, "Foreign"),
+        &String::from_str(&env, "FRG"),
+    );
+    foreign.mint(&foreign_admin, &client.address, &5_000);
+
+    let recovery = Address::generate(&env);
+    let result = client.try_rescue_tokens(&admin, &foreign_id, &recovery, &0);
+    assert_eq!(result, Err(Ok(TokenError::InvalidAmount)));
+
+    // More than the contract holds reverts with InsufficientBalance.
+    let result = client.try_rescue_tokens(&admin, &foreign_id, &recovery, &6_000);
+    assert_eq!(result, Err(Ok(TokenError::InsufficientBalance)));
+
+    assert_eq!(foreign.balance(&recovery), 0);
 }

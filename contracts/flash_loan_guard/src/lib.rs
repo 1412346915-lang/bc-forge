@@ -1,3 +1,14 @@
+//! # bc-forge Flash Loan Guard Contract
+//!
+//! Same-ledger deposit/withdraw reentrancy guard (#923).
+//!
+//! The contract tracks the ledger sequence of a user's most recent deposit
+//! and rejects withdrawals attempted in the same ledger block, blocking
+//! flash-loan-funded withdrawal loops. It holds no admin: every call is
+//! authorized by the user whose address is passed in.
+
+#![no_std]
+
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
 
 #[derive(Clone)]
@@ -41,3 +52,6 @@ impl FlashLoanGuardContract {
             .remove(&DataKey::DepositBlock(user));
     }
 }
+
+#[cfg(test)]
+mod test;
