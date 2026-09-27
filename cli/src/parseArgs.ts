@@ -1,4 +1,4 @@
-import { Command } from "commander";
+import { Command, CommanderError } from "commander";
 import { createUpgradeCommand } from "./commands/upgrade.js";
 import { createSmokeTestCommand } from "./commands/smoke-test.js";
 import { createCheckStatusCommand } from "./commands/check-status.js";
@@ -53,15 +53,26 @@ export function buildProgram(): Command {
  *
  * The return value is what the matched subcommand's action received as its
  * options object, taken from the command Commander actually invoked. It is
- * `undefined` when no subcommand ran — for example `--help`, `--version`, or
- * a bare invocation — because there are no command options to report. A parse
- * error is thrown, not returned.
+ * `undefined` when no subcommand ran — `--help`, `--version`, or a bare
+ * invocation — because there are no command options to report. Help and
+ * version still print, then return. A parse error is thrown, not returned.
  */
 export async function parseArgs(
   argv: string[] = process.argv,
 ): Promise<Record<string, unknown> | undefined> {
   const program = buildProgram();
-  await program.parseAsync(argv);
+  program.exitOverride();
+  try {
+    await program.parseAsync(argv);
+  } catch (err) {
+    if (
+      err instanceof CommanderError &&
+      (err.code === "commander.helpDisplayed" || err.code === "commander.version")
+    ) {
+      return undefined;
+    }
+    throw err;
+  }
 
   const [invokedName] = program.args;
   if (!invokedName) {

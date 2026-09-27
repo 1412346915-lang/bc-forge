@@ -70,10 +70,9 @@ describe("parseArgs return contract (#350)", () => {
     expect(opts!.networkPassphrase).toBe("Public Global Stellar Network ; September 2015");
   });
 
-  it("returns undefined when no subcommand ran", async () => {
-    // --version prints and exits; there is no command whose options to report
-    const opts = await quietParseArgs(["--version"]).catch(() => "threw");
-    expect(opts === undefined || opts === "threw").toBe(true);
+  it("returns undefined for --help and --version", async () => {
+    await expect(quietParseArgs(["--version"])).resolves.toBeUndefined();
+    await expect(quietParseArgs(["--help"])).resolves.toBeUndefined();
   });
 
   it("does not silently swallow a parse error", async () => {
