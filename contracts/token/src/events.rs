@@ -115,8 +115,10 @@ pub fn emit_burn(env: &Env, from: &Address, amount: i128, new_balance: i128, new
 /// @param to The recipient address.
 /// @param amount The amount transferred.
 pub fn emit_transfer(env: &Env, from: &Address, to: &Address, amount: i128) {
-    env.events()
-        .publish((symbol_short!("xfer"),), (from.clone(), to.clone(), amount, EVENT_SCHEMA_VERSION));
+    env.events().publish(
+        (symbol_short!("xfer"),),
+        (from.clone(), to.clone(), amount, EVENT_SCHEMA_VERSION),
+    );
 }
 
 /// Emits the `xfer_frm` event when tokens are transferred using allowance.
@@ -162,7 +164,13 @@ pub fn emit_transfer_from(
 pub fn emit_approve(env: &Env, from: &Address, spender: &Address, amount: i128, expiration: u32) {
     env.events().publish(
         (symbol_short!("approve"),),
-        (from.clone(), spender.clone(), amount, expiration, EVENT_SCHEMA_VERSION),
+        (
+            from.clone(),
+            spender.clone(),
+            amount,
+            expiration,
+            EVENT_SCHEMA_VERSION,
+        ),
     );
 }
 
@@ -187,8 +195,10 @@ pub fn emit_ownership_transferred(env: &Env, old_admin: &Address, new_admin: &Ad
 /// @param env The Soroban environment.
 /// @param admin The admin address that paused the contract.
 pub fn emit_paused(env: &Env, admin: &Address) {
-    env.events()
-        .publish((symbol_short!("paused"),), (admin.clone(), EVENT_SCHEMA_VERSION));
+    env.events().publish(
+        (symbol_short!("paused"),),
+        (admin.clone(), EVENT_SCHEMA_VERSION),
+    );
 }
 
 /// Emits the `unpause` event when the contract is unpaused.
@@ -198,8 +208,10 @@ pub fn emit_paused(env: &Env, admin: &Address) {
 /// @param env The Soroban environment.
 /// @param admin The admin address that unpaused the contract.
 pub fn emit_unpaused(env: &Env, admin: &Address) {
-    env.events()
-        .publish((symbol_short!("unpause"),), (admin.clone(), EVENT_SCHEMA_VERSION));
+    env.events().publish(
+        (symbol_short!("unpause"),),
+        (admin.clone(), EVENT_SCHEMA_VERSION),
+    );
 }
 
 /// Emits the `upgraded` event when the contract is upgraded.
@@ -212,7 +224,11 @@ pub fn emit_unpaused(env: &Env, admin: &Address) {
 pub fn emit_upgraded(env: &Env, upgrader: &Address, new_wasm_hash: &BytesN<32>) {
     env.events().publish(
         (symbol_short!("upgraded"),),
-        (upgrader.clone(), new_wasm_hash.clone(), EVENT_SCHEMA_VERSION),
+        (
+            upgrader.clone(),
+            new_wasm_hash.clone(),
+            EVENT_SCHEMA_VERSION,
+        ),
     );
 }
 

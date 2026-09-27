@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{Env, Address};
+    use soroban_sdk::{Address, Env};
 
     #[test]
     #[should_panic(expected = "FlashLoanReentrancy")]
