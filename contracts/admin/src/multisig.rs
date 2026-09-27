@@ -437,7 +437,7 @@ fn _start_timelock_if_quorate(env: &Env, proposal_id: u64) {
 /// Sets `timelock_expires_at` to `Some(env.ledger().timestamp() + TIMELOCK_DELAY_SECS)`
 /// the moment quorum is reached (`proposal.status == ProposalStatus::Approved`).
 /// Idempotent: if `timelock_expires_at` is already `Some`, it is never reset by later votes.
-fn _start_upgrade_timelock_if_quorate(env: &Env, proposal: &mut UpgradeProposal) {
+pub(crate) fn _start_upgrade_timelock_if_quorate(env: &Env, proposal: &mut UpgradeProposal) {
     if proposal.status == ProposalStatus::Approved && proposal.timelock_expires_at.is_none() {
         proposal.timelock_expires_at =
             Some(env.ledger().timestamp().saturating_add(TIMELOCK_DELAY_SECS));

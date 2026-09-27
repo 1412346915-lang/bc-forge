@@ -203,14 +203,18 @@ mod events;
 mod reentrancy_guard;
 
 use bc_forge_ttl as ttl;
-use soroban_sdk::{contracterror, contracttype, vec, Address, BytesN, Env, Map, String, Vec};
+use soroban_sdk::{contracterror, contracttype, Address, Env};
+#[cfg(test)]
+use soroban_sdk::{vec, BytesN, Map, String, Vec};
 mod address;
 mod multisig;
 mod rbac;
 
 pub use address::*;
+pub(crate) use multisig::_start_upgrade_timelock_if_quorate;
 pub use multisig::*;
 pub use rbac::*;
+pub(crate) use rbac::{_revoke_role, role_bit};
 
 /// Errors returned by the admin access-control module.
 ///

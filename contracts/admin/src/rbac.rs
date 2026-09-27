@@ -140,7 +140,7 @@ pub const ROLE_BIT_SUPER_ADMIN: u32 = 1 << 2;
 pub const ROLE_BIT_PAUSER: u32 = 1 << 3;
 
 /// Returns the bitmask bit for `role`, or `None` for an unrecognized variant.
-fn role_bit(role: Role) -> Option<u32> {
+pub(crate) fn role_bit(role: Role) -> Option<u32> {
     match role {
         Role::Admin => Some(ROLE_BIT_ADMIN),
         Role::Minter => Some(ROLE_BIT_MINTER),
@@ -640,7 +640,7 @@ pub fn revoke_role(
 /// - [`AdminError::RoleNotHeld`] — `address` does not currently hold `role`.
 /// # Events
 /// Emits `role_rvk` with data `(admin, role, address)` on success.
-fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
+pub(crate) fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
     require_non_zero_address(env, address);
     let bit = match role_bit(role) {
         Some(bit) => bit,
