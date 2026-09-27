@@ -172,3 +172,23 @@ pub fn emit_unlock_time_cleared(env: &Env, caller: &Address, user: &Address) {
     env.events()
         .publish((symbol_short!("unlock"),), (caller.clone(), user.clone()));
 }
+
+/// Emitted when withdrawal cooldown configuration is set or updated.
+pub fn emit_cooldown_config_set(env: &Env, admin: &Address, config: &crate::CooldownConfig) {
+    env.events()
+        .publish((symbol_short!("c_cfg"),), (admin.clone(), config.clone()));
+}
+
+/// Emitted when a withdrawal is queued in cooldown mode.
+pub fn emit_withdraw_queued(
+    env: &Env,
+    caller: &Address,
+    shares: i128,
+    amount: i128,
+    release_ledger: u32,
+) {
+    env.events().publish(
+        (symbol_short!("w_queued"),),
+        (caller.clone(), shares, amount, release_ledger),
+    );
+}
