@@ -173,6 +173,15 @@ pub fn emit_unlock_time_cleared(env: &Env, caller: &Address, user: &Address) {
         .publish((symbol_short!("unlock"),), (caller.clone(), user.clone()));
 }
 
+/// Emitted when the admin rescues a foreign token balance out of the vault via
+/// [`crate::WrapperContract::rescue_tokens`].
+pub fn emit_rescued(env: &Env, caller: &Address, token: &Address, to: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("rescue"),),
+        (caller.clone(), token.clone(), to.clone(), amount),
+    );
+}
+
 /// Emitted when withdrawal cooldown configuration is set or updated.
 pub fn emit_cooldown_config_set(env: &Env, admin: &Address, config: &crate::CooldownConfig) {
     env.events()
